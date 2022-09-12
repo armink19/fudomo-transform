@@ -33,21 +33,29 @@ class MetamodelInferer {
 
             let refType = null;
             let typeDesc = null;
+            let cardinality = null;
             if (featureName == 'cont') {
               refType = 'containment';
               typeDesc = value.type;
+              cardinality = value.refId;
+      
+        
             } else if (value instanceof ObjectModel) {
               refType = 'reference';
               typeDesc = value.type;
+              cardinality = value.refId;
+             
             } else {
               refType = 'attribute';
               typeDesc = obj.getAttributeType(featureName);
+              cardinality = 1;
               if (Array.isArray(typeDesc)) {
                 typeDesc = { seq: Array.from(new Set(typeDesc)) };
+                cardinality =1;
               }
             }
 
-            featureSpecs.add(JSON.stringify({ 'name': featureName, 'referenceType': refType, 'objectType': typeDesc }));
+            featureSpecs.add(JSON.stringify({ 'name': featureName, 'referenceType': refType, 'objectType': typeDesc, 'cardinality': cardinality }));
 
             if (value instanceof ObjectModel) {
               open.push(value);
@@ -60,7 +68,7 @@ class MetamodelInferer {
     const result = new Map();
 
     for (const objectType of Object.keys(metamodel)) {
-      const objectResult = new Map();
+      
       const featureSpecs = Array.from(metamodel[objectType] || []).map(json => JSON.parse(json));
       if (featureSpecs.length == 0) continue;
 
@@ -78,26 +86,34 @@ class MetamodelInferer {
       }
 
       // Objects
+      const objectResult = new Map();
+      const cardinalityResult= {};
       result.set(objectType, objectResult);
 
       const attrFeatures = featureSpecs.filter(spec => spec.referenceType == 'attribute');
       const contFeatures = featureSpecs.filter(spec => spec.referenceType == 'containment');
       const refFeatures = featureSpecs.filter(spec => spec.referenceType == 'reference');
+     
+      
 
       const attrFeatureNames = Array.from(new Set(attrFeatures.map(spec => spec.name))).sort();
       const contFeatureNames = Array.from(new Set(contFeatures.map(spec => spec.name))).sort();
       const refFeatureNames = Array.from(new Set(refFeatures.map(spec => spec.name))).sort();
-
+//debugger;  
       // Attributes
       for (const attrName of attrFeatureNames) {
         let possibleTypes = objectResult.get(attrName);
         if (possibleTypes == null) {
           possibleTypes = new Set();
           objectResult.set(attrName, possibleTypes);
+          
         }
-
+        const max = featureSpecs.filter((obj) => obj.name === attrName).length;
+        //cardinalityResult.set(attrName, '[1..'+max+']');
+        cardinalityResult[attrName]= '[1..'+max+']'
         for (const spec of attrFeatures.filter(spec => spec.name == attrName)) {
-          possibleTypes.add(spec.objectType);
+          //possibleTypes.set(spec.objectType,cardinalityResult.get(attrName));
+          possibleTypes.add(spec.objectType+' '+ cardinalityResult[attrName]);
         }
       }
 
@@ -108,9 +124,12 @@ class MetamodelInferer {
           possibleTypes = new Set();
           objectResult.set(contName, possibleTypes);
         }
-
+        const max = featureSpecs.filter((obj) => obj.name === contName).length;
+        //cardinalityResult.set(contName, '[1..'+max+']');
+        cardinalityResult[contName]= '[1..'+max+']'
         for (const spec of contFeatures.filter(spec => spec.name == contName)) {
-          possibleTypes.add(spec.objectType);
+          //possibleTypes.set(spec.objectType,cardinalityResult.get(contName));
+          possibleTypes.add(spec.objectType+' '+ cardinalityResult[contName]);
         }
       }
 
@@ -121,13 +140,17 @@ class MetamodelInferer {
           possibleTypes = new Set();
           objectResult.set(refName, possibleTypes);
         }
-
+        const max = featureSpecs.filter((obj) => obj.name === refName).length;
+        //cardinalityResult.set(refName, '[1..'+max+']');
+        cardinalityResult[refName]= '[1..'+max+']'
         for (const spec of refFeatures.filter(spec => spec.name == refName)) {
-          possibleTypes.add(spec.objectType);
+          //possibleTypes.set(spec.objectType,cardinalityResult.get(refName));
+          possibleTypes.add(spec.objectType+' '+ cardinalityResult[refName]);
         }
       }
+      //debugger;
     }
-
+   //debugger;
     // Sort possible types
     for (const objectType of result.keys()) {
       const objectSpec = result.get(objectType);
@@ -142,6 +165,16 @@ class MetamodelInferer {
     return result;
   }
 }
+
+const checkOccurrence = (array, element) => {
+  let counter = 0;
+  for (item of array.flat()) {
+      if (item == element) {
+          counter++;
+      }
+  };
+  console.log(counter);
+};
 
 const SCALAR_TYPES = new Set(['int', 'float', 'bool', 'string', 'null']);
 
