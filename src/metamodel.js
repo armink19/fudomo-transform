@@ -107,7 +107,9 @@ class MetamodelInferer {
       for (const feature of featureSpecs){
         if (feature.id!=undefined){
         possibleId.add(feature.id);}
+     
       }
+
 
       for (const object_id of possibleId){
          
