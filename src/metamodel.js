@@ -30,23 +30,26 @@ class MetamodelInferer {
 
           for (const value of values) {
             let featureSpecs = metamodel[obj.type];
-
             let refType = null;
             let typeDesc = null;
+            let id= null;
             let cardinality = null;
             if (featureName == 'cont') {
               refType = 'containment';
               typeDesc = value.type;
+              id=value.id.charAt(5);
               cardinality = value.refId;
       
-        
+   
             } else if (value instanceof ObjectModel) {
               refType = 'reference';
               typeDesc = value.type;
+              id=value.id.charAt(5);
               cardinality = value.refId;
              
             } else {
               refType = 'attribute';
+              id=value.id;
               typeDesc = obj.getAttributeType(featureName);
               cardinality = 1;
               if (Array.isArray(typeDesc)) {
@@ -55,7 +58,7 @@ class MetamodelInferer {
               }
             }
 
-            featureSpecs.add(JSON.stringify({ 'name': featureName, 'referenceType': refType, 'objectType': typeDesc, 'cardinality': cardinality }));
+            featureSpecs.add(JSON.stringify({ 'name': featureName, 'referenceType': refType, 'objectType': typeDesc, 'refId': cardinality,  'id':id }));
 
             if (value instanceof ObjectModel) {
               open.push(value);
@@ -65,8 +68,13 @@ class MetamodelInferer {
       }
     }
 
-    const result = new Map();
+    
 
+    const result = new Map();
+    let objectModelsbyID = new Map();
+    let cardRef= new Set();
+    let cardCont= new Set();
+    let cardAttr= new Set();
     for (const objectType of Object.keys(metamodel)) {
       
       const featureSpecs = Array.from(metamodel[objectType] || []).map(json => JSON.parse(json));
@@ -94,47 +102,79 @@ class MetamodelInferer {
       const contFeatures = featureSpecs.filter(spec => spec.referenceType == 'containment');
       const refFeatures = featureSpecs.filter(spec => spec.referenceType == 'reference');
      
-      
+      const possibleId = new Set()
+
+      for (const feature of featureSpecs){
+        if (feature.id!=undefined){
+        possibleId.add(feature.id);}
+      }
+
+      for (const object_id of possibleId){
+         
+        let tempFeatures = featureSpecs.filter(spec => spec.id == object_id);
+        objectModelsbyID.set(object_id,tempFeatures);}
 
       const attrFeatureNames = Array.from(new Set(attrFeatures.map(spec => spec.name))).sort();
       const contFeatureNames = Array.from(new Set(contFeatures.map(spec => spec.name))).sort();
       const refFeatureNames = Array.from(new Set(refFeatures.map(spec => spec.name))).sort();
-//debugger;  
+//debugger; 
+
+      for (const attrName of attrFeatureNames) {
+      for (const value of objectModelsbyID.values()) {
+      const count = value.filter((obj) => obj.name === attrName).length;
+      cardAttr.add({name:attrName,count:count});}
+}
+    
       // Attributes
       for (const attrName of attrFeatureNames) {
         let possibleTypes = objectResult.get(attrName);
+        let max=0;
+        let min=0;
         if (possibleTypes == null) {
           possibleTypes = new Set();
           objectResult.set(attrName, possibleTypes);
           
         }
-        const max = featureSpecs.filter((obj) => obj.name === attrName).length;
-        //cardinalityResult.set(attrName, '[1..'+max+']');
-        cardinalityResult[attrName]= '[1..'+max+']'
+        if(featureSpecs.filter((obj) => obj.name === attrName).length==1){
+        max = 1;
+        min = 1;} else {
+          max=1; min=0;
+        }
+        cardinalityResult[attrName]= '['+min+'..'+max+']';
         for (const spec of attrFeatures.filter(spec => spec.name == attrName)) {
-          //possibleTypes.set(spec.objectType,cardinalityResult.get(attrName));
           possibleTypes.add(spec.objectType+' '+ cardinalityResult[attrName]);
         }
       }
 
-      // Cont
-      for (const contName of contFeatureNames) {
-        let possibleTypes = objectResult.get(contName);
-        if (possibleTypes == null) {
-          possibleTypes = new Set();
-          objectResult.set(contName, possibleTypes);
-        }
-        const max = featureSpecs.filter((obj) => obj.name === contName).length;
-        //cardinalityResult.set(contName, '[1..'+max+']');
-        cardinalityResult[contName]= '[1..'+max+']'
-        for (const spec of contFeatures.filter(spec => spec.name == contName)) {
-          //possibleTypes.set(spec.objectType,cardinalityResult.get(contName));
-          possibleTypes.add(spec.objectType+' '+ cardinalityResult[contName]);
-        }
+      for (const cont of contFeatures) {
+        for (const value of objectModelsbyID.values()) {
+          const count = value.filter((obj) => obj.name === cont.name).length;
+          cardCont.add({name:cont.name,objectType:cont.objectType,count:count});}
+         // debugger;
       }
 
-      // References
-      for (const refName of refFeatureNames) {
+      // Cont
+      for (const cont of contFeatures) {
+        let possibleTypes = objectResult.get(cont.name);
+        if (possibleTypes == null) {
+          possibleTypes = new Set();
+          objectResult.set(cont.name, possibleTypes);
+        }
+        let numbers= new Set();
+        for(const val of cardCont){
+        if(val.objectType== cont.objectType){
+          numbers.add(val.count);}}
+
+        let min=Array.from(numbers).reduce((a, b) => Math.min(a, b), Infinity);
+        let max=Array.from(numbers).reduce((a, b) => Math.max(a, b), -Infinity);
+        cardinalityResult[cont.name]= '['+min+'..'+max+']';
+        for (const spec of contFeatures.filter(spec => spec.name == cont.name)) {
+          if(cardinalityResult[cont.name]!=undefined){
+          possibleTypes.add(spec.objectType+' '+ cardinalityResult[cont.name]);}} 
+      }
+
+   /*   // References
+     for (const refName of refFeatureNames) {
         let possibleTypes = objectResult.get(refName);
         if (possibleTypes == null) {
           possibleTypes = new Set();
@@ -147,9 +187,36 @@ class MetamodelInferer {
           //possibleTypes.set(spec.objectType,cardinalityResult.get(refName));
           possibleTypes.add(spec.objectType+' '+ cardinalityResult[refName]);
         }
+      }*/
+      for (const refName of refFeatureNames) {
+        for (const value of objectModelsbyID.values()) {
+          const count = value.filter((obj) => obj.name === refName).length;
+          cardRef.add({name:refName,count:count});}
       }
-      //debugger;
+      
+          // References
+      for (const refName of refFeatureNames) {
+        let possibleTypes = objectResult.get(refName);
+        if (possibleTypes == null) {
+          possibleTypes = new Set();
+          objectResult.set(refName, possibleTypes);
+        }      
+        let numbers= new Set();
+        for(const val of cardRef){
+        if(val.name== refName){
+          numbers.add(val.count);}}
+
+        let min=Array.from(numbers).reduce((a, b) => Math.min(a, b), Infinity);
+        let max=Array.from(numbers).reduce((a, b) => Math.max(a, b), -Infinity);
+        cardinalityResult[refName]= '['+min+'..'+max+']';
+        for (const spec of refFeatures.filter(spec => spec.name == refName)) {
+          if(cardinalityResult[refName]!=undefined){
+          possibleTypes.add(spec.objectType+' '+ cardinalityResult[refName]);}}
+      }
+        
+     
     }
+    
    //debugger;
     // Sort possible types
     for (const objectType of result.keys()) {
@@ -160,6 +227,7 @@ class MetamodelInferer {
           objectSpec.set(featureName, Array.from(possibleTypes).sort());
         }
       }
+     
     }
 
     return result;
