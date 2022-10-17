@@ -11,6 +11,7 @@ class MetamodelInferer {
 
     const visited = new Set();
     const open = objectModels.map(centeredModel => centeredModel.center);
+    
 
     while (open.length > 0) {
       const obj = open.pop();
@@ -25,10 +26,12 @@ class MetamodelInferer {
         let scalarType = obj.scalarType;
         metamodel[obj.type].add(JSON.stringify({ 'scalarType': scalarType }));
       } else {
+        let internalID=1;
         for (const featureName of obj.featureNames) {
           const values = obj.getFeatureAsArray(featureName);
-
+          
           for (const value of values) {
+            debugger;
             let featureSpecs = metamodel[obj.type];
             let refType = null;
             let typeDesc = null;
@@ -37,34 +40,41 @@ class MetamodelInferer {
             if (featureName == 'cont') {
               refType = 'containment';
               typeDesc = value.type;
-              id=value.id.charAt(5);
+              let ids=(value.id.substr(5,value.id.length-1)).split(".");
+              id=ids[0];
               cardinality = value.refId;
       
    
             } else if (value instanceof ObjectModel) {
               refType = 'reference';
               typeDesc = value.type;
-              id=value.id.charAt(5);
+              let ids=(value.id.substr(5,value.id.length-1)).split(".");
+              id=ids[0];
               cardinality = value.refId;
              
             } else {
               refType = 'attribute';
-              id=value.id;
+              let ids=(obj.id.substr(5,obj.id.length-1)).split(".");
+              id=ids[0];
               typeDesc = obj.getAttributeType(featureName);
-              cardinality = 1;
+              cardinality = obj.refId;
               if (Array.isArray(typeDesc)) {
                 typeDesc = { seq: Array.from(new Set(typeDesc)) };
-                cardinality =1;
+                cardinality =obj.refId;
               }
             }
-
-            featureSpecs.add(JSON.stringify({ 'name': featureName, 'referenceType': refType, 'objectType': typeDesc, 'refId': cardinality,  'id':id }));
+            
+            featureSpecs.add(JSON.stringify({ 'name': featureName, 'referenceType': refType, 'objectType': typeDesc, 'refId': cardinality,  'id':id, 'internalID':id+'.'+internalID }));
 
             if (value instanceof ObjectModel) {
               open.push(value);
+              
             }
+            
           }
+         
         }
+        internalID++;
       }
     }
 
@@ -115,18 +125,18 @@ class MetamodelInferer {
          
         let tempFeatures = featureSpecs.filter(spec => spec.id == object_id);
         objectModelsbyID.set(object_id,tempFeatures);}
-
+       
       const attrFeatureNames = Array.from(new Set(attrFeatures.map(spec => spec.name))).sort();
       const contFeatureNames = Array.from(new Set(contFeatures.map(spec => spec.name))).sort();
       const refFeatureNames = Array.from(new Set(refFeatures.map(spec => spec.name))).sort();
-//debugger; 
+ 
 
       for (const attrName of attrFeatureNames) {
       for (const value of objectModelsbyID.values()) {
       const count = value.filter((obj) => obj.name === attrName).length;
       cardAttr.add({name:attrName,count:count});}
-}
-    
+      }
+
       // Attributes
       for (const attrName of attrFeatureNames) {
         let possibleTypes = objectResult.get(attrName);
@@ -152,7 +162,7 @@ class MetamodelInferer {
         for (const value of objectModelsbyID.values()) {
           const count = value.filter((obj) => obj.name === cont.name).length;
           cardCont.add({name:cont.name,objectType:cont.objectType,count:count});}
-         // debugger;
+          //debugger;
       }
 
       // Cont
@@ -276,10 +286,21 @@ class Validator {
     }
     return false;
   }
-
+  
   _getAttributeOrRefTypeSpec(type, attrName) {
     const typeSpec = this.metamodel[type] || {};
-    return typeSpec[attrName];
+    let str= typeSpec[attrName];
+    let result= str[0].split(" ");
+    let bounds= result[1].substr(1,result[1].length-2).split("..");
+    return result[0];
+  }
+
+  _getAttributeOrRefTypeSpecBounds(type, attrName) {
+    const typeSpec = this.metamodel[type] || {};
+    let str= typeSpec[attrName];
+    let result= str[0].split(" ");
+    let bounds= result[1].substr(1,result[1].length-2).split("..");
+    return bounds;
   }
 
   attrOrRefExists(type, attrName) {
@@ -447,7 +468,12 @@ class DataValidator extends Validator {
         }
       } else {
         for (const featureName of obj.featureNames) {
-
+          if(this._getAttributeOrRefTypeSpecBounds(obj.type, featureName)[0]> obj.getFeatureAsArray(featureName).length){
+            res.push(this.makeError(`Object of type ${obj.type}`, `Attribute or reference ${featureName} out of bounds Min: ${this._getAttributeOrRefTypeSpecBounds(obj.type, featureName)[0]}`, obj.getFeatureNameLocation(featureName)));
+          }
+          if(this._getAttributeOrRefTypeSpecBounds(obj.type, featureName)[1]< obj.getFeatureAsArray(featureName).length){
+            res.push(this.makeError(`Object of type ${obj.type}`, `Attribute or reference ${featureName} out of bounds Max: ${this._getAttributeOrRefTypeSpecBounds(obj.type, featureName)[1]}`, obj.getFeatureNameLocation(featureName)));
+          }
           if (!this.attrOrRefExists(obj.type, featureName)) {
             res.push(this.makeError(`Object of type ${obj.type}`, `Attribute or reference ${featureName} not found in type ${obj.type} in metamodel`, obj.getFeatureNameLocation(featureName)));
           } else {
